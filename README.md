@@ -10,13 +10,16 @@ Windows and Linux:
 - Vulkan loader entry points (`vk_icdNegotiateLoaderICDInterfaceVersion`,
   `vk_icdGetInstanceProcAddr`).
 - Instance, physical-device, logical-device, queue, and capability-query stubs.
+- Command pool, command buffer, fence, semaphore, buffer, memory, map, and bind stubs
+  that let more loader/probe paths complete without immediate `VK_ERROR_*` exits.
 - Conservative Intel HD Graphics 4000-like device properties and memory limits.
 - Linux and Windows ICD manifest templates.
 - A smoke test that verifies required ICD exports remain present.
 
-> Status: bootstrap/prototype. The ICD is intentionally conservative and returns
-> `VK_ERROR_FEATURE_NOT_PRESENT` for real queue submissions until command
-> execution and resource management are implemented.
+> Status: bootstrap/prototype. The ICD now defaults to a safe no-op submission
+> mode so simple probes do not immediately fail with `VK_ERROR_FEATURE_NOT_PRESENT`.
+> It still does not execute GPU work or render real frames yet. Set
+> `VULKAN_RETRO_STRICT_SUBMIT=1` to restore strict failure for submitted work.
 
 ## Build
 
@@ -51,5 +54,6 @@ rules. The shared library output name is `vulkan_retro.dll`.
 ## Roadmap
 
 See [`docs/architecture.md`](docs/architecture.md) for the implementation plan.
-The next milestone is host-visible memory, buffers/images, and command-buffer
-recording for a minimal Vulkan 1.0 triangle path.
+The next milestone is image/swapchain support and a backend that can translate
+recorded command streams into real rendering work for a minimal Vulkan 1.0
+triangle path.

@@ -66,11 +66,87 @@ int main() {
         return 1;
     }
 
-    if (vkQueueSubmit(queue, 1, nullptr, nullptr) != VK_ERROR_FEATURE_NOT_PRESENT) {
-        std::cerr << "implemented queue submit must not be advertised yet\n";
+    VkCommandPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.queueFamilyIndex = 0;
+
+    VkCommandPool command_pool = nullptr;
+    if (vkCreateCommandPool(device, &pool_info, nullptr, &command_pool) != VK_SUCCESS || command_pool == nullptr) {
+        std::cerr << "command-pool creation failed\n";
         return 1;
     }
 
+    VkCommandBufferAllocateInfo command_buffer_info{};
+    command_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    command_buffer_info.commandPool = command_pool;
+    command_buffer_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    command_buffer_info.commandBufferCount = 1;
+
+    VkCommandBuffer command_buffer = nullptr;
+    if (vkAllocateCommandBuffers(device, &command_buffer_info, &command_buffer) != VK_SUCCESS || command_buffer == nullptr) {
+        std::cerr << "command-buffer allocation failed\n";
+        return 1;
+    }
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(command_buffer, &begin_info) != VK_SUCCESS || vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {
+        std::cerr << "command-buffer recording failed\n";
+        return 1;
+    }
+
+    VkFenceCreateInfo fence_info{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = nullptr;
+    if (vkCreateFence(device, &fence_info, nullptr, &fence) != VK_SUCCESS || fence == nullptr) {
+        std::cerr << "fence creation failed\n";
+        return 1;
+    }
+
+    VkSubmitInfo submit_info{};
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &command_buffer;
+    if (vkQueueSubmit(queue, 1, &submit_info, fence) != VK_SUCCESS || vkWaitForFences(device, 1, &fence, 1, 0) != VK_SUCCESS) {
+        std::cerr << "no-op queue submit failed\n";
+        return 1;
+    }
+
+    VkBufferCreateInfo buffer_info{};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = 4096;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBuffer buffer = nullptr;
+    if (vkCreateBuffer(device, &buffer_info, nullptr, &buffer) != VK_SUCCESS || buffer == nullptr) {
+        std::cerr << "buffer creation failed\n";
+        return 1;
+    }
+
+    VkMemoryRequirements requirements{};
+    vkGetBufferMemoryRequirements(device, buffer, &requirements);
+    VkMemoryAllocateInfo allocation_info{};
+    allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocation_info.allocationSize = requirements.size;
+    allocation_info.memoryTypeIndex = 0;
+    VkDeviceMemory memory = nullptr;
+    if (vkAllocateMemory(device, &allocation_info, nullptr, &memory) != VK_SUCCESS ||
+        vkBindBufferMemory(device, buffer, memory, 0) != VK_SUCCESS) {
+        std::cerr << "buffer memory setup failed\n";
+        return 1;
+    }
+    void* mapped = nullptr;
+    if (vkMapMemory(device, memory, 0, requirements.size, 0, &mapped) != VK_SUCCESS || mapped == nullptr) {
+        std::cerr << "memory mapping failed\n";
+        return 1;
+    }
+    vkUnmapMemory(device, memory);
+
+    vkDestroyBuffer(device, buffer, nullptr);
+    vkFreeMemory(device, memory, nullptr);
+    vkDestroyFence(device, fence, nullptr);
+    vkFreeCommandBuffers(device, command_pool, 1, &command_buffer);
+    vkDestroyCommandPool(device, command_pool, nullptr);
     vkDestroyDevice(device, nullptr);
     vkDestroyInstance(instance, nullptr);
     std::cout << "Vulkan Retro ICD bootstrap smoke passed\n";

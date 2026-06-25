@@ -12,6 +12,11 @@ required_exports = [
     "vkGetPhysicalDeviceProperties",
     "vkCreateDevice",
     "vkQueueSubmit",
+    "vkCreateCommandPool",
+    "vkAllocateCommandBuffers",
+    "vkCreateBuffer",
+    "vkAllocateMemory",
+    "vkMapMemory",
 ]
 missing = [name for name in required_exports if name not in source]
 if missing:

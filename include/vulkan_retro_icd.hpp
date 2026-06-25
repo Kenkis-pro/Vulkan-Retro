@@ -24,6 +24,12 @@ using VkPhysicalDevice = struct VkPhysicalDevice_T*;
 using VkDevice = struct VkDevice_T*;
 using VkQueue = struct VkQueue_T*;
 using VkCommandBuffer = struct VkCommandBuffer_T*;
+using VkCommandPool = struct VkCommandPool_T*;
+using VkFence = struct VkFence_T*;
+using VkSemaphore = struct VkSemaphore_T*;
+using VkBuffer = struct VkBuffer_T*;
+using VkImage = struct VkImage_T*;
+using VkDeviceMemory = struct VkDeviceMemory_T*;
 using VkAllocationCallbacks = struct VkAllocationCallbacks_T;
 
 using VkResult = int32_t;
@@ -37,6 +43,8 @@ constexpr VkResult VK_ERROR_LAYER_NOT_PRESENT = -6;
 constexpr VkResult VK_ERROR_EXTENSION_NOT_PRESENT = -7;
 constexpr VkResult VK_ERROR_INCOMPATIBLE_DRIVER = -9;
 constexpr VkResult VK_ERROR_FEATURE_NOT_PRESENT = -8;
+constexpr VkResult VK_ERROR_OUT_OF_DEVICE_MEMORY = -2;
+constexpr VkResult VK_TIMEOUT = 2;
 
 constexpr uint32_t VK_MAKE_VERSION_COMPAT(uint32_t major, uint32_t minor, uint32_t patch) {
     return (major << 22U) | (minor << 12U) | patch;
@@ -58,15 +66,40 @@ constexpr uint32_t VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT = 0x00000001;
 constexpr uint32_t VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT = 0x00000002;
 constexpr uint32_t VK_MEMORY_PROPERTY_HOST_COHERENT_BIT = 0x00000004;
 constexpr uint32_t VK_MEMORY_HEAP_DEVICE_LOCAL_BIT = 0x00000001;
+constexpr uint32_t VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT = 0x00000002;
+constexpr uint32_t VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT = 0x00000001;
+constexpr uint32_t VK_FENCE_CREATE_SIGNALED_BIT = 0x00000001;
+constexpr uint32_t VK_BUFFER_USAGE_TRANSFER_SRC_BIT = 0x00000001;
+constexpr uint32_t VK_BUFFER_USAGE_TRANSFER_DST_BIT = 0x00000002;
+constexpr uint32_t VK_BUFFER_USAGE_VERTEX_BUFFER_BIT = 0x00000080;
+constexpr uint32_t VK_BUFFER_USAGE_INDEX_BUFFER_BIT = 0x00000040;
+constexpr uint32_t VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT = 0x00000010;
 
 using VkStructureType = int32_t;
 constexpr VkStructureType VK_STRUCTURE_TYPE_APPLICATION_INFO = 0;
 constexpr VkStructureType VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO = 1;
 constexpr VkStructureType VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO = 2;
 constexpr VkStructureType VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO = 3;
+constexpr VkStructureType VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO = 39;
+constexpr VkStructureType VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO = 40;
+constexpr VkStructureType VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO = 42;
+constexpr VkStructureType VK_STRUCTURE_TYPE_FENCE_CREATE_INFO = 8;
+constexpr VkStructureType VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO = 9;
+constexpr VkStructureType VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO = 12;
+constexpr VkStructureType VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO = 5;
 
 using VkPhysicalDeviceType = int32_t;
 constexpr VkPhysicalDeviceType VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU = 1;
+
+using VkCommandBufferLevel = int32_t;
+constexpr VkCommandBufferLevel VK_COMMAND_BUFFER_LEVEL_PRIMARY = 0;
+constexpr VkCommandBufferLevel VK_COMMAND_BUFFER_LEVEL_SECONDARY = 1;
+
+using VkSharingMode = int32_t;
+constexpr VkSharingMode VK_SHARING_MODE_EXCLUSIVE = 0;
+
+using VkBufferUsageFlags = VkFlags;
+using VkMemoryPropertyFlags = VkFlags;
 
 struct VkApplicationInfo {
     VkStructureType sType;
@@ -197,6 +230,76 @@ struct VkQueueFamilyProperties {
     struct { uint32_t width; uint32_t height; uint32_t depth; } minImageTransferGranularity;
 };
 
+struct VkCommandPoolCreateInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkFlags flags;
+    uint32_t queueFamilyIndex;
+};
+
+struct VkCommandBufferAllocateInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkCommandPool commandPool;
+    VkCommandBufferLevel level;
+    uint32_t commandBufferCount;
+};
+
+struct VkCommandBufferBeginInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkFlags flags;
+    const void* pInheritanceInfo;
+};
+
+struct VkSubmitInfo {
+    VkStructureType sType;
+    const void* pNext;
+    uint32_t waitSemaphoreCount;
+    const VkSemaphore* pWaitSemaphores;
+    const uint64_t* pWaitDstStageMask;
+    uint32_t commandBufferCount;
+    const VkCommandBuffer* pCommandBuffers;
+    uint32_t signalSemaphoreCount;
+    const VkSemaphore* pSignalSemaphores;
+};
+
+struct VkFenceCreateInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkFlags flags;
+};
+
+struct VkSemaphoreCreateInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkFlags flags;
+};
+
+struct VkBufferCreateInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkFlags flags;
+    VkDeviceSize size;
+    VkBufferUsageFlags usage;
+    VkSharingMode sharingMode;
+    uint32_t queueFamilyIndexCount;
+    const uint32_t* pQueueFamilyIndices;
+};
+
+struct VkMemoryAllocateInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkDeviceSize allocationSize;
+    uint32_t memoryTypeIndex;
+};
+
+struct VkMemoryRequirements {
+    VkDeviceSize size;
+    VkDeviceSize alignment;
+    uint32_t memoryTypeBits;
+};
+
 struct VkMemoryType {
     VkFlags propertyFlags;
     uint32_t heapIndex;
@@ -229,8 +332,30 @@ VKR_DECLARE void VKR_CALL vkDestroyDevice(VkDevice, const VkAllocationCallbacks*
 VKR_DECLARE void VKR_CALL vkGetDeviceQueue(VkDevice, uint32_t, uint32_t, VkQueue*);
 VKR_DECLARE VkResult VKR_CALL vkDeviceWaitIdle(VkDevice);
 VKR_DECLARE VkResult VKR_CALL vkQueueWaitIdle(VkQueue);
-VKR_DECLARE VkResult VKR_CALL vkQueueSubmit(VkQueue, uint32_t, const void*, void*);
+VKR_DECLARE VkResult VKR_CALL vkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence);
 VKR_DECLARE PFN_vkVoidFunction VKR_CALL vkGetInstanceProcAddr(VkInstance, const char*);
 VKR_DECLARE PFN_vkVoidFunction VKR_CALL vkGetDeviceProcAddr(VkDevice, const char*);
 VKR_DECLARE PFN_vkVoidFunction VKR_CALL vk_icdGetInstanceProcAddr(VkInstance, const char*);
 VKR_DECLARE VkResult VKR_CALL vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t*);
+
+VKR_DECLARE VkResult VKR_CALL vkCreateCommandPool(VkDevice, const VkCommandPoolCreateInfo*, const VkAllocationCallbacks*, VkCommandPool*);
+VKR_DECLARE void VKR_CALL vkDestroyCommandPool(VkDevice, VkCommandPool, const VkAllocationCallbacks*);
+VKR_DECLARE VkResult VKR_CALL vkAllocateCommandBuffers(VkDevice, const VkCommandBufferAllocateInfo*, VkCommandBuffer*);
+VKR_DECLARE void VKR_CALL vkFreeCommandBuffers(VkDevice, VkCommandPool, uint32_t, const VkCommandBuffer*);
+VKR_DECLARE VkResult VKR_CALL vkBeginCommandBuffer(VkCommandBuffer, const VkCommandBufferBeginInfo*);
+VKR_DECLARE VkResult VKR_CALL vkEndCommandBuffer(VkCommandBuffer);
+VKR_DECLARE VkResult VKR_CALL vkResetCommandBuffer(VkCommandBuffer, VkFlags);
+VKR_DECLARE VkResult VKR_CALL vkCreateFence(VkDevice, const VkFenceCreateInfo*, const VkAllocationCallbacks*, VkFence*);
+VKR_DECLARE void VKR_CALL vkDestroyFence(VkDevice, VkFence, const VkAllocationCallbacks*);
+VKR_DECLARE VkResult VKR_CALL vkWaitForFences(VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t);
+VKR_DECLARE VkResult VKR_CALL vkResetFences(VkDevice, uint32_t, const VkFence*);
+VKR_DECLARE VkResult VKR_CALL vkCreateSemaphore(VkDevice, const VkSemaphoreCreateInfo*, const VkAllocationCallbacks*, VkSemaphore*);
+VKR_DECLARE void VKR_CALL vkDestroySemaphore(VkDevice, VkSemaphore, const VkAllocationCallbacks*);
+VKR_DECLARE VkResult VKR_CALL vkCreateBuffer(VkDevice, const VkBufferCreateInfo*, const VkAllocationCallbacks*, VkBuffer*);
+VKR_DECLARE void VKR_CALL vkDestroyBuffer(VkDevice, VkBuffer, const VkAllocationCallbacks*);
+VKR_DECLARE void VKR_CALL vkGetBufferMemoryRequirements(VkDevice, VkBuffer, VkMemoryRequirements*);
+VKR_DECLARE VkResult VKR_CALL vkAllocateMemory(VkDevice, const VkMemoryAllocateInfo*, const VkAllocationCallbacks*, VkDeviceMemory*);
+VKR_DECLARE void VKR_CALL vkFreeMemory(VkDevice, VkDeviceMemory, const VkAllocationCallbacks*);
+VKR_DECLARE VkResult VKR_CALL vkMapMemory(VkDevice, VkDeviceMemory, VkDeviceSize, VkDeviceSize, VkFlags, void**);
+VKR_DECLARE void VKR_CALL vkUnmapMemory(VkDevice, VkDeviceMemory);
+VKR_DECLARE VkResult VKR_CALL vkBindBufferMemory(VkDevice, VkBuffer, VkDeviceMemory, VkDeviceSize);

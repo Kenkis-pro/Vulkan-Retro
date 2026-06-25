@@ -19,9 +19,11 @@ for that class of integrated GPU.
 1. **ICD bootstrap**: loader negotiation, instance/device enumeration, property
    queries, queue-family discovery, and manifest packaging.
 2. **Memory/resources**: host-visible memory allocation, buffer/image metadata,
-   and format capability tables tuned for Ivy Bridge.
+   and format capability tables tuned for Ivy Bridge. Basic host-visible buffer
+   memory exists today; images and format tables remain future work.
 3. **Command recording**: command pools, command buffers, render-pass metadata,
-   barriers, and validation of unsupported paths.
+   barriers, and validation of unsupported paths. Basic no-op command-buffer
+   lifetime exists today so applications get fewer immediate `VK_ERROR_*` exits.
 4. **Execution backend**: Windows and Linux backend shims that translate the safe
    subset to the platform graphics stack available on the target machine.
 5. **Conformance growth**: add Vulkan 1.0 commands incrementally with CTS-style
@@ -30,8 +32,8 @@ for that class of integrated GPU.
 ## Current implementation contract
 
 The current ICD is intentionally conservative. It is loader-discoverable, reports
-one integrated GPU compatibility device, supports basic instance/device/queue
-lifetime queries, and returns `VK_ERROR_FEATURE_NOT_PRESENT` for submitted work
-until command execution exists. This prevents applications from mistaking the
-prototype for a complete renderer while giving the project a buildable,
-cross-platform driver foundation.
+one integrated GPU compatibility device, supports basic instance/device/queue,
+command-buffer, synchronization, buffer, and host-visible-memory lifetime paths,
+and defaults queue submission to a no-op success path. This avoids many early
+`VK_ERROR_*` exits during application probing, while still making it clear that
+real GPU command execution and presentation are not implemented yet.

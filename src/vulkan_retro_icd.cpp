@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <string_view>
@@ -26,6 +27,14 @@ struct VkQueue_T {
     uint32_t index = 0;
 };
 
+struct VkCommandPool_T { VkDevice device = nullptr; uint32_t queue_family = 0; };
+struct VkCommandBuffer_T { VkCommandPool pool = nullptr; bool recording = false; bool executable = false; };
+struct VkFence_T { bool signaled = false; };
+struct VkSemaphore_T { bool signaled = false; };
+struct VkBuffer_T { VkDeviceSize size = 0; VkDeviceMemory memory = nullptr; VkDeviceSize memory_offset = 0; };
+struct VkImage_T { VkDevice device = nullptr; };
+struct VkDeviceMemory_T { std::vector<uint8_t> bytes; bool mapped = false; };
+
 namespace {
 
 std::mutex g_mutex;
@@ -33,6 +42,12 @@ std::vector<std::unique_ptr<VkInstance_T>> g_instances;
 std::vector<std::unique_ptr<VkPhysicalDevice_T>> g_physical_devices;
 std::vector<std::unique_ptr<VkDevice_T>> g_devices;
 std::vector<std::unique_ptr<VkQueue_T>> g_queues;
+std::vector<std::unique_ptr<VkCommandPool_T>> g_command_pools;
+std::vector<std::unique_ptr<VkCommandBuffer_T>> g_command_buffers;
+std::vector<std::unique_ptr<VkFence_T>> g_fences;
+std::vector<std::unique_ptr<VkSemaphore_T>> g_semaphores;
+std::vector<std::unique_ptr<VkBuffer_T>> g_buffers;
+std::vector<std::unique_ptr<VkDeviceMemory_T>> g_memories;
 
 constexpr std::array<const char*, 0> kInstanceExtensions{};
 constexpr std::array<const char*, 0> kDeviceExtensions{};
@@ -48,6 +63,18 @@ void copy_string(char* dst, std::size_t dst_size, std::string_view src) {
 
 bool has_unsupported_names(uint32_t count, const char* const* names) {
     return count != 0 && names != nullptr;
+}
+
+bool strict_submit_mode() {
+    const char* value = std::getenv("VULKAN_RETRO_STRICT_SUBMIT");
+    return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
+
+template <typename T>
+void erase_handle(std::vector<std::unique_ptr<T>>& handles, T* handle) {
+    handles.erase(std::remove_if(handles.begin(), handles.end(), [handle](const auto& item) {
+        return item.get() == handle;
+    }), handles.end());
 }
 
 template <typename T, std::size_t N>
@@ -310,11 +337,223 @@ VKR_EXPORT VkResult VKR_CALL vkQueueWaitIdle(VkQueue queue) {
     return queue == nullptr ? VK_ERROR_INITIALIZATION_FAILED : VK_SUCCESS;
 }
 
-VKR_EXPORT VkResult VKR_CALL vkQueueSubmit(VkQueue queue, uint32_t submit_count, const void*, void*) {
+VKR_EXPORT VkResult VKR_CALL vkQueueSubmit(VkQueue queue, uint32_t, const VkSubmitInfo* submit_infos, VkFence fence) {
     if (queue == nullptr) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    return submit_count == 0 ? VK_SUCCESS : VK_ERROR_FEATURE_NOT_PRESENT;
+    if (strict_submit_mode() && submit_infos != nullptr) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (fence != nullptr) {
+        fence->signaled = true;
+    }
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT VkResult VKR_CALL vkCreateCommandPool(
+    VkDevice device, const VkCommandPoolCreateInfo* create_info, const VkAllocationCallbacks*, VkCommandPool* pool) {
+    if (device == nullptr || create_info == nullptr || pool == nullptr || create_info->queueFamilyIndex != 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    auto handle = std::make_unique<VkCommandPool_T>();
+    handle->device = device;
+    handle->queue_family = create_info->queueFamilyIndex;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    *pool = handle.get();
+    g_command_pools.emplace_back(std::move(handle));
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT void VKR_CALL vkDestroyCommandPool(VkDevice, VkCommandPool pool, const VkAllocationCallbacks*) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    erase_handle(g_command_pools, pool);
+}
+
+VKR_EXPORT VkResult VKR_CALL vkAllocateCommandBuffers(
+    VkDevice device, const VkCommandBufferAllocateInfo* allocate_info, VkCommandBuffer* command_buffers) {
+    if (device == nullptr || allocate_info == nullptr || allocate_info->commandPool == nullptr || command_buffers == nullptr) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (uint32_t i = 0; i < allocate_info->commandBufferCount; ++i) {
+        auto handle = std::make_unique<VkCommandBuffer_T>();
+        handle->pool = allocate_info->commandPool;
+        command_buffers[i] = handle.get();
+        g_command_buffers.emplace_back(std::move(handle));
+    }
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT void VKR_CALL vkFreeCommandBuffers(VkDevice, VkCommandPool, uint32_t count, const VkCommandBuffer* command_buffers) {
+    if (command_buffers == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (uint32_t i = 0; i < count; ++i) {
+        erase_handle(g_command_buffers, command_buffers[i]);
+    }
+}
+
+VKR_EXPORT VkResult VKR_CALL vkBeginCommandBuffer(VkCommandBuffer command_buffer, const VkCommandBufferBeginInfo*) {
+    if (command_buffer == nullptr) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    command_buffer->recording = true;
+    command_buffer->executable = false;
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT VkResult VKR_CALL vkEndCommandBuffer(VkCommandBuffer command_buffer) {
+    if (command_buffer == nullptr || !command_buffer->recording) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    command_buffer->recording = false;
+    command_buffer->executable = true;
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT VkResult VKR_CALL vkResetCommandBuffer(VkCommandBuffer command_buffer, VkFlags) {
+    if (command_buffer == nullptr) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    command_buffer->recording = false;
+    command_buffer->executable = false;
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT VkResult VKR_CALL vkCreateFence(VkDevice device, const VkFenceCreateInfo* create_info, const VkAllocationCallbacks*, VkFence* fence) {
+    if (device == nullptr || fence == nullptr) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    auto handle = std::make_unique<VkFence_T>();
+    handle->signaled = create_info != nullptr && (create_info->flags & VK_FENCE_CREATE_SIGNALED_BIT) != 0;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    *fence = handle.get();
+    g_fences.emplace_back(std::move(handle));
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT void VKR_CALL vkDestroyFence(VkDevice, VkFence fence, const VkAllocationCallbacks*) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    erase_handle(g_fences, fence);
+}
+
+VKR_EXPORT VkResult VKR_CALL vkWaitForFences(VkDevice device, uint32_t count, const VkFence* fences, VkBool32, uint64_t timeout) {
+    if (device == nullptr || (count != 0 && fences == nullptr)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (fences[i] != nullptr && !fences[i]->signaled && timeout == 0) {
+            return VK_TIMEOUT;
+        }
+        if (fences[i] != nullptr) {
+            fences[i]->signaled = true;
+        }
+    }
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT VkResult VKR_CALL vkResetFences(VkDevice device, uint32_t count, const VkFence* fences) {
+    if (device == nullptr || (count != 0 && fences == nullptr)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (fences[i] != nullptr) {
+            fences[i]->signaled = false;
+        }
+    }
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT VkResult VKR_CALL vkCreateSemaphore(VkDevice device, const VkSemaphoreCreateInfo*, const VkAllocationCallbacks*, VkSemaphore* semaphore) {
+    if (device == nullptr || semaphore == nullptr) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    auto handle = std::make_unique<VkSemaphore_T>();
+    std::lock_guard<std::mutex> lock(g_mutex);
+    *semaphore = handle.get();
+    g_semaphores.emplace_back(std::move(handle));
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT void VKR_CALL vkDestroySemaphore(VkDevice, VkSemaphore semaphore, const VkAllocationCallbacks*) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    erase_handle(g_semaphores, semaphore);
+}
+
+VKR_EXPORT VkResult VKR_CALL vkCreateBuffer(VkDevice device, const VkBufferCreateInfo* create_info, const VkAllocationCallbacks*, VkBuffer* buffer) {
+    if (device == nullptr || create_info == nullptr || buffer == nullptr || create_info->size == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    auto handle = std::make_unique<VkBuffer_T>();
+    handle->size = create_info->size;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    *buffer = handle.get();
+    g_buffers.emplace_back(std::move(handle));
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT void VKR_CALL vkDestroyBuffer(VkDevice, VkBuffer buffer, const VkAllocationCallbacks*) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    erase_handle(g_buffers, buffer);
+}
+
+VKR_EXPORT void VKR_CALL vkGetBufferMemoryRequirements(VkDevice, VkBuffer buffer, VkMemoryRequirements* requirements) {
+    if (buffer == nullptr || requirements == nullptr) {
+        return;
+    }
+    requirements->size = (buffer->size + 255ULL) & ~255ULL;
+    requirements->alignment = 256;
+    requirements->memoryTypeBits = 1;
+}
+
+VKR_EXPORT VkResult VKR_CALL vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo* allocate_info, const VkAllocationCallbacks*, VkDeviceMemory* memory) {
+    if (device == nullptr || allocate_info == nullptr || memory == nullptr || allocate_info->memoryTypeIndex != 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    auto handle = std::make_unique<VkDeviceMemory_T>();
+    try {
+        handle->bytes.resize(static_cast<std::size_t>(allocate_info->allocationSize));
+    } catch (...) {
+        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    *memory = handle.get();
+    g_memories.emplace_back(std::move(handle));
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT void VKR_CALL vkFreeMemory(VkDevice, VkDeviceMemory memory, const VkAllocationCallbacks*) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    erase_handle(g_memories, memory);
+}
+
+VKR_EXPORT VkResult VKR_CALL vkMapMemory(VkDevice device, VkDeviceMemory memory, VkDeviceSize offset, VkDeviceSize size, VkFlags, void** data) {
+    if (device == nullptr || memory == nullptr || data == nullptr || offset > memory->bytes.size()) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    const VkDeviceSize map_size = size == ~0ULL ? memory->bytes.size() - offset : size;
+    if (offset + map_size > memory->bytes.size()) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    memory->mapped = true;
+    *data = memory->bytes.data() + offset;
+    return VK_SUCCESS;
+}
+
+VKR_EXPORT void VKR_CALL vkUnmapMemory(VkDevice, VkDeviceMemory memory) {
+    if (memory != nullptr) {
+        memory->mapped = false;
+    }
+}
+
+VKR_EXPORT VkResult VKR_CALL vkBindBufferMemory(VkDevice device, VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize offset) {
+    if (device == nullptr || buffer == nullptr || memory == nullptr || offset >= memory->bytes.size()) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    buffer->memory = memory;
+    buffer->memory_offset = offset;
+    return VK_SUCCESS;
 }
 
 VKR_EXPORT PFN_vkVoidFunction VKR_CALL vkGetInstanceProcAddr(VkInstance, const char* name) {
@@ -357,6 +596,27 @@ PFN_vkVoidFunction get_proc_addr(std::string_view name) {
     VKR_PROC(vkDeviceWaitIdle);
     VKR_PROC(vkQueueWaitIdle);
     VKR_PROC(vkQueueSubmit);
+    VKR_PROC(vkCreateCommandPool);
+    VKR_PROC(vkDestroyCommandPool);
+    VKR_PROC(vkAllocateCommandBuffers);
+    VKR_PROC(vkFreeCommandBuffers);
+    VKR_PROC(vkBeginCommandBuffer);
+    VKR_PROC(vkEndCommandBuffer);
+    VKR_PROC(vkResetCommandBuffer);
+    VKR_PROC(vkCreateFence);
+    VKR_PROC(vkDestroyFence);
+    VKR_PROC(vkWaitForFences);
+    VKR_PROC(vkResetFences);
+    VKR_PROC(vkCreateSemaphore);
+    VKR_PROC(vkDestroySemaphore);
+    VKR_PROC(vkCreateBuffer);
+    VKR_PROC(vkDestroyBuffer);
+    VKR_PROC(vkGetBufferMemoryRequirements);
+    VKR_PROC(vkAllocateMemory);
+    VKR_PROC(vkFreeMemory);
+    VKR_PROC(vkMapMemory);
+    VKR_PROC(vkUnmapMemory);
+    VKR_PROC(vkBindBufferMemory);
     VKR_PROC(vkGetInstanceProcAddr);
     VKR_PROC(vkGetDeviceProcAddr);
     VKR_PROC(vk_icdGetInstanceProcAddr);
